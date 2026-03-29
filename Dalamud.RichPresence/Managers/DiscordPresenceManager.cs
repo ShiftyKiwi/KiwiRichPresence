@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using Dalamud.Utility;
@@ -9,68 +9,85 @@ namespace Dalamud.RichPresence.Managers
 {
     internal class DiscordPresenceManager : IDisposable
     {
-        private DirectoryInfo RPC_BRIDGE_PATH => new(Path.Combine(RichPresencePlugin.DalamudPluginInterface.AssemblyLocation.Directory!.FullName, "Resources/binaries", "WineRPCBridge.exe"));
-
         private const string DISCORD_CLIENT_ID = "478143453536976896";
-        private DiscordRpcClient RpcClient;
-        private Process? bridgeProcess;
+
+        private FileInfo RpcBridgePath => new(
+            Path.Combine(
+                RichPresencePlugin.DalamudPluginInterface.AssemblyLocation.Directory?.FullName
+                    ?? throw new InvalidOperationException("Unable to resolve plugin assembly directory."),
+                "Resources",
+                "binaries",
+                "WineRPCBridge.exe"));
+
+        private DiscordRpcClient RpcClient = null!;
+        private Process? ownedBridgeProcess;
+        private bool bridgeStartedByPlugin;
 
         internal DiscordPresenceManager()
         {
             this.CreateClient();
-
-            if (Util.IsWine() && RichPresencePlugin.RichPresenceConfig.RPCBridgeEnabled)
-            {
-                this.StartWineRPCBridge();
-            }
+            this.ApplyRuntimeConfig(RichPresencePlugin.RichPresenceConfig);
         }
 
         private void CreateClient()
         {
-            if (RpcClient is null || RpcClient.IsDisposed)
+            if (this.RpcClient is null || this.RpcClient.IsDisposed)
             {
-                // Create new RPC client
-                RpcClient = new DiscordRpcClient(DISCORD_CLIENT_ID);
-
-                // Skip identical presences
-                RpcClient.SkipIdenticalPresence = true;
-
-                // Set logger
-                RpcClient.Logger = new ConsoleLogger { Level = LogLevel.Warning };
-
-                // Subscribe to events
-                RpcClient.OnPresenceUpdate += (sender, e) => { System.Console.WriteLine("Received Update! {0}", e.Presence); };
+                this.RpcClient = new DiscordRpcClient(DISCORD_CLIENT_ID)
+                {
+                    SkipIdenticalPresence = true,
+                    Logger = new ConsoleLogger { Level = LogLevel.Warning },
+                };
             }
 
-            if (!RpcClient.IsInitialized)
+            if (!this.RpcClient.IsInitialized)
             {
-                // Connect to the RPC
-                RpcClient.Initialize();
+                this.RpcClient.Initialize();
             }
         }
 
-        public void StartWineRPCBridge()
+        public void ApplyRuntimeConfig(RichPresence.Configuration.RichPresenceConfig config)
+        {
+            if (!Util.IsWine())
+            {
+                return;
+            }
+
+            if (config.RPCBridgeEnabled)
+            {
+                this.StartWineRpcBridge();
+            }
+            else
+            {
+                this.StopOwnedWineRpcBridge();
+            }
+        }
+
+        public void StartWineRpcBridge()
         {
             try
             {
-                // Check if bridge is already running.
-                var wineBridge = Process.GetProcessesByName(this.RPC_BRIDGE_PATH.Name);
-                if (wineBridge.Length > 0)
+                if (this.ownedBridgeProcess is not null && !this.ownedBridgeProcess.HasExited)
                 {
-                    RichPresencePlugin.PluginLog.Information($"Found existing RPC bridge process, PID: {wineBridge[0].Id}, not starting a new one.");
-                    this.bridgeProcess = wineBridge[0];
                     return;
                 }
 
-                // Start the bridge.
-                RichPresencePlugin.PluginLog.Information($"Starting RPC bridge process: {this.RPC_BRIDGE_PATH}");
-                this.bridgeProcess = Process.Start(new ProcessStartInfo
+                var wineBridge = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(this.RpcBridgePath.Name));
+                if (wineBridge.Length > 0)
                 {
-                    FileName = this.RPC_BRIDGE_PATH.FullName,
+                    RichPresencePlugin.PluginLog.Information($"Found existing RPC bridge process, PID: {wineBridge[0].Id}, not starting a new one.");
+                    return;
+                }
+
+                RichPresencePlugin.PluginLog.Information($"Starting RPC bridge process: {this.RpcBridgePath.FullName}");
+                this.ownedBridgeProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName = this.RpcBridgePath.FullName,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 })!;
-                RichPresencePlugin.PluginLog.Information($"Started RPC bridge process, PID: {this.bridgeProcess.Id}");
+                this.bridgeStartedByPlugin = true;
+                RichPresencePlugin.PluginLog.Information($"Started RPC bridge process, PID: {this.ownedBridgeProcess.Id}");
             }
             catch (Exception e)
             {
@@ -78,39 +95,61 @@ namespace Dalamud.RichPresence.Managers
             }
         }
 
+        public void StopOwnedWineRpcBridge()
+        {
+            if (!this.bridgeStartedByPlugin || this.ownedBridgeProcess is null)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!this.ownedBridgeProcess.HasExited)
+                {
+                    this.ownedBridgeProcess.Kill();
+                    RichPresencePlugin.PluginLog.Information($"Killed RPC bridge process: {this.ownedBridgeProcess.Id}");
+                }
+            }
+            catch (Exception ex)
+            {
+                RichPresencePlugin.PluginLog.Error(ex, "Error stopping Wine bridge process.");
+            }
+            finally
+            {
+                this.ownedBridgeProcess.Dispose();
+                this.ownedBridgeProcess = null;
+                this.bridgeStartedByPlugin = false;
+            }
+        }
+
         public void SetPresence(DiscordRPC.RichPresence newPresence)
         {
             this.CreateClient();
-            RpcClient.SetPresence(newPresence);
+            this.RpcClient.SetPresence(newPresence);
         }
 
         public void ClearPresence()
         {
             this.CreateClient();
-            RpcClient.ClearPresence();
+            this.RpcClient.ClearPresence();
         }
 
         public void UpdatePresenceDetails(string details)
         {
             this.CreateClient();
-            RpcClient.UpdateDetails(details);
+            this.RpcClient.UpdateDetails(details);
         }
 
         public void UpdatePresenceStartTime(DateTime newStartTime)
         {
             this.CreateClient();
-            RpcClient.UpdateStartTime(newStartTime);
+            this.RpcClient.UpdateStartTime(newStartTime);
         }
 
         public void Dispose()
         {
-            if (this.bridgeProcess is not null)
-            {
-                this.bridgeProcess.Kill();
-                RichPresencePlugin.PluginLog.Information($"Killed RPC bridge process: {this.bridgeProcess.Id}");
-            }
-
-            RpcClient?.Dispose();
+            this.StopOwnedWineRpcBridge();
+            this.RpcClient?.Dispose();
         }
     }
 }

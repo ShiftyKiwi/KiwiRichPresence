@@ -1,0 +1,22 @@
+[
+  {
+    "Author": "goat, maintained by Franze, edited by ShiftyKiwi",
+    "Name": "KiwiRichPresence",
+    "Punchline": "Customizable Discord Rich Presence for FFXIV",
+    "Description": "Forked and expanded Discord Rich Presence for FFXIV with templates, job/context presets, custom images, privacy controls, and live preview tools.",
+    "InternalName": "KiwiRichPresence",
+    "AssemblyVersion": "3.0.0.0",
+    "RepoUrl": "https://github.com/ShiftyKiwi/Dalamud.RichPresence",
+    "ApplicableVersion": "any",
+    "Tags": [
+      "Discord",
+      "Rich Presence",
+      "Customization"
+    ],
+    "DalamudApiLevel": 14,
+    "DownloadLinkInstall": "https://github.com/ShiftyKiwi/Dalamud.RichPresence/releases/latest/download/KiwiRichPresence-latest.zip",
+    "DownloadLinkUpdate": "https://github.com/ShiftyKiwi/Dalamud.RichPresence/releases/latest/download/KiwiRichPresence-latest.zip",
+    "IconUrl": "https://raw.githubusercontent.com/ShiftyKiwi/Dalamud.RichPresence/master/Dalamud.RichPresence/icon.png",
+    "Changelog": "Fork release as KiwiRichPresence. Preserves the original FFXIV Discord Rich Presence core while adding global, context, and job-based overrides, custom large/small artwork, hover text, privacy controls, live preview, manual apply/testing, and the latest stabilization pass."
+  }
+]

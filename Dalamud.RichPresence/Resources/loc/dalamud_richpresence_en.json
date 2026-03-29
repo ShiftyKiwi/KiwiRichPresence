@@ -32,15 +32,15 @@
     "description": "Dalamud.RichPresence.PlaceZone.Unknown"
   },
   "DalamudRichPresenceOpenConfiguration": {
-    "message": "Open the Discord Rich Presence configuration.",
+    "message": "Open the KiwiRichPresence configuration.",
     "description": "Dalamud.RichPresence.OpenConfiguration"
   },
   "DalamudRichPresenceConfiguration": {
-    "message": "Discord Rich Presence Configuration",
+    "message": "KiwiRichPresence Configuration",
     "description": "Dalamud.RichPresence.Configuration"
   },
   "DalamudRichPresencePreface1": {
-    "message": "This window allows you to configure Discord Rich Presence.",
+    "message": "This window allows you to configure KiwiRichPresence.",
     "description": "Dalamud.RichPresence.Configuration.Preface.Line1"
   },
   "DalamudRichPresencePreface2": {
@@ -74,6 +74,62 @@
   "DalamudRichPresenceShowDataCenter": {
     "message": "Show data center name",
     "description": "Dalamud.RichPresence.Configuration.ShowDataCenter"
+  },
+  "DalamudRichPresenceUseCustomLargeImage": {
+    "message": "Use custom large image",
+    "description": "Dalamud.RichPresence.Configuration.UseCustomLargeImage"
+  },
+  "DalamudRichPresenceCustomLargeImageDetail": {
+    "message": "Use a public http(s) image URL instead of zone artwork. Discord will fit it into the standard large artwork slot and keep it across zone changes. Square images usually look best. Local file paths are not supported.",
+    "description": "Dalamud.RichPresence.Configuration.CustomLargeImageDetail"
+  },
+  "DalamudRichPresenceCustomLargeImageUrl": {
+    "message": "Custom large image URL",
+    "description": "Dalamud.RichPresence.Configuration.CustomLargeImageUrl"
+  },
+  "DalamudRichPresenceCustomLargeImageValid": {
+    "message": "This URL looks valid and will replace the zone image while enabled.",
+    "description": "Dalamud.RichPresence.Configuration.CustomLargeImageValid"
+  },
+  "DalamudRichPresenceCustomLargeImageInvalid": {
+    "message": "Enter a valid public http(s) image URL up to 256 characters long. If the URL is invalid, the plugin falls back to the normal zone image.",
+    "description": "Dalamud.RichPresence.Configuration.CustomLargeImageInvalid"
+  },
+  "DalamudRichPresenceCustomStatusDetail": {
+    "message": "Custom text overrides the normal first and second Rich Presence lines during regular gameplay and in menus. Login queue and AFK status can still take priority.",
+    "description": "Dalamud.RichPresence.Configuration.CustomStatusDetail"
+  },
+  "DalamudRichPresenceUseCustomDetailsText": {
+    "message": "Use custom top line",
+    "description": "Dalamud.RichPresence.Configuration.UseCustomDetailsText"
+  },
+  "DalamudRichPresenceCustomDetailsText": {
+    "message": "Custom top line text",
+    "description": "Dalamud.RichPresence.Configuration.CustomDetailsText"
+  },
+  "DalamudRichPresenceCustomDetailsTextValid": {
+    "message": "This text fits within Discord's 128-byte limit and will replace the normal top line while enabled.",
+    "description": "Dalamud.RichPresence.Configuration.CustomDetailsTextValid"
+  },
+  "DalamudRichPresenceCustomDetailsTextInvalid": {
+    "message": "Enter text that stays within Discord's 128-byte limit. If it is too long, the plugin falls back to the normal top line.",
+    "description": "Dalamud.RichPresence.Configuration.CustomDetailsTextInvalid"
+  },
+  "DalamudRichPresenceUseCustomStateText": {
+    "message": "Use custom second line",
+    "description": "Dalamud.RichPresence.Configuration.UseCustomStateText"
+  },
+  "DalamudRichPresenceCustomStateText": {
+    "message": "Custom second line text",
+    "description": "Dalamud.RichPresence.Configuration.CustomStateText"
+  },
+  "DalamudRichPresenceCustomStateTextValid": {
+    "message": "This text fits within Discord's 128-byte limit and will replace the normal second line while enabled.",
+    "description": "Dalamud.RichPresence.Configuration.CustomStateTextValid"
+  },
+  "DalamudRichPresenceCustomStateTextInvalid": {
+    "message": "Enter text that stays within Discord's 128-byte limit. If it is too long, the plugin falls back to the normal second line.",
+    "description": "Dalamud.RichPresence.Configuration.CustomStateTextInvalid"
   },
   "DalamudRichPresenceShowStartTime": {
     "message": "Show elapsed time in zones",

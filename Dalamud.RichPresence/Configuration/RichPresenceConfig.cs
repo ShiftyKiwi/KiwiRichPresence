@@ -1,34 +1,52 @@
-﻿using Dalamud.Configuration;
+using System.Collections.Generic;
+using Dalamud.Configuration;
+using Dalamud.RichPresence.Models;
 
 namespace Dalamud.RichPresence.Configuration
 {
-    class RichPresenceConfig : IPluginConfiguration
+    internal class RichPresenceConfig : IPluginConfiguration
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
 
-        // Show login queue position
         public bool ShowLoginQueuePosition = true;
-        // Show character name
         public bool ShowName = true;
-        // Show Free Company Tag
         public bool ShowFreeCompany = true;
-        // Show world name
         public bool ShowWorld = true;
-        // Always show home world in details (even when on home world)
         public bool AlwaysShowHomeWorld = false;
-        // show data center name alongside world
         public bool ShowDataCenter = false;
 
-        // Show elapsed time in zones
+        public bool UseCustomLargeImage = false;
+        public string CustomLargeImageUrl = string.Empty;
+        public bool HideLargeImage = false;
+        public bool UseCustomLargeImageText = false;
+        public string CustomLargeImageTextTemplate = string.Empty;
+
+        public bool UseCustomDetailsText = false;
+        public string CustomDetailsText = string.Empty;
+        public bool UseCustomStateText = false;
+        public string CustomStateText = string.Empty;
+
+        public bool HideSmallImage = false;
+        public bool UseCustomSmallImage = false;
+        public string CustomSmallImageUrl = string.Empty;
+        public bool UseCustomSmallImageText = false;
+        public string CustomSmallImageTextTemplate = string.Empty;
+
+        public PresenceLocationPrivacyMode LocationPrivacyMode = PresenceLocationPrivacyMode.Exact;
+
+        public PresenceContextOverride MenuOverride = new();
+        public PresenceContextOverride QueueOverride = new();
+        public PresenceContextOverride OpenWorldOverride = new();
+        public PresenceContextOverride HousingOverride = new();
+        public PresenceContextOverride DutyOverride = new();
+        public PresenceContextOverride AfkOverride = new();
+        public List<PresenceJobOverride> JobOverrides = [];
+
         public bool ShowStartTime = false;
-        // Reset timer when changing zones
         public bool ResetTimeWhenChangingZones = true;
 
-        // Show current job
         public bool ShowJob = true;
-        // Abbreviate current job name
         public bool AbbreviateJob = true;
-        // Show current job level
         public bool ShowLevel = true;
 
         public bool ShowParty = true;

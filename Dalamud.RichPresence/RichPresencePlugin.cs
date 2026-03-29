@@ -3,28 +3,24 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using Dalamud.Game;
-using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Command;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using Lumina.Excel.Sheets;
-
-using DiscordRPC;
 
 using Dalamud.RichPresence.Configuration;
 using Dalamud.RichPresence.Interface;
 using Dalamud.RichPresence.Managers;
 using Dalamud.RichPresence.Models;
-using System.Xml.Linq;
-using Lumina.Extensions;
-using FFXIVClientStructs.FFXIV.Client.Game;
 
 namespace Dalamud.RichPresence
 {
     internal unsafe class RichPresencePlugin : IDalamudPlugin, IDisposable
     {
+        private static readonly TimeSpan PresencePollInterval = TimeSpan.FromSeconds(2);
+        private const int CurrentConfigVersion = 2;
+
         [PluginService]
         internal static IDalamudPluginInterface DalamudPluginInterface { get; private set; } = null!;
 
@@ -41,6 +37,9 @@ namespace Dalamud.RichPresence
         internal static IFramework Framework { get; private set; } = null!;
 
         [PluginService]
+        internal static IObjectTable ObjectTable { get; private set; } = null!;
+
+        [PluginService]
         internal static IPartyList PartyList { get; private set; } = null!;
 
         [PluginService]
@@ -49,133 +48,245 @@ namespace Dalamud.RichPresence
         [PluginService]
         internal static ICondition Condition { get; private set; } = null!;
 
-        internal static LocalizationManager? LocalizationManager { get; private set; }
-        internal static DiscordPresenceManager? DiscordPresenceManager { get; private set; }
-        internal static IpcManager? IpcManager { get; private set; }
+        internal static LocalizationManager LocalizationManager { get; private set; } = null!;
+        internal static DiscordPresenceManager DiscordPresenceManager { get; private set; } = null!;
+        internal static IpcManager IpcManager { get; private set; } = null!;
+        internal static RichPresenceConfig RichPresenceConfig { get; set; } = null!;
 
-        private static RichPresenceConfigWindow? RichPresenceConfigWindow;
-        internal static RichPresenceConfig? RichPresenceConfig { get; set; }
+        private static RichPresencePlugin? activeInstance;
+        private static RichPresenceConfigWindow RichPresenceConfigWindow = null!;
 
-        private List<TerritoryType> Territories;
+        private readonly PresenceResolver presenceResolver;
+        private PresencePreviewSnapshot cachedPreviewSnapshot = new();
+        private RichPresenceConfig? pendingPreviewConfig;
+        private bool previewRefreshPending;
+        private bool presenceDirty = true;
+        private DateTime nextPresencePollAtUtc = DateTime.MinValue;
         private DateTime startTime = DateTime.UtcNow;
-        private bool presenceInQueue;
-
-        private  Lumina.Excel.ExcelSheet<World>? WorldSheet;
-        private  Lumina.Excel.ExcelSheet<TerritoryType>? TerritoryTypeSheet;
-        private  Lumina.Excel.ExcelSheet<PlaceName>? PlaceNameSheet;
-        private  Lumina.Excel.ExcelSheet<ClassJob>? ClassJobSheet;
-        private  Lumina.Excel.ExcelSheet<OnlineStatus>? OnlineStatusSheet;
-        private Lumina.Excel.ExcelSheet<ContentFinderCondition> ContentFinderConditionSheet;
-
-        private static HousingManager* HousingInfo => HousingManager.Instance();
-
-
-        private const string DEFAULT_LARGE_IMAGE_KEY = "li_1";
-        private const string DEFAULT_SMALL_IMAGE_KEY = "class_0";
-        private static readonly DiscordRPC.RichPresence DEFAULT_PRESENCE = new()
-        {
-            Assets = new Assets
-            {
-                LargeImageKey = DEFAULT_LARGE_IMAGE_KEY,
-                SmallImageKey = DEFAULT_SMALL_IMAGE_KEY,
-            },
-        };
 
         public RichPresencePlugin()
         {
-            RichPresenceConfig = DalamudPluginInterface.GetPluginConfig() as RichPresenceConfig ?? new RichPresenceConfig();
+            activeInstance = this;
+            RichPresenceConfig = NormalizeConfig(DalamudPluginInterface.GetPluginConfig() as RichPresenceConfig ?? new RichPresenceConfig());
 
             DiscordPresenceManager = new DiscordPresenceManager();
             LocalizationManager = new LocalizationManager();
             IpcManager = new IpcManager();
-            SetDefaultPresence();
+
+            var territories = DataManager.GetExcelSheet<TerritoryType>().ToList();
+            var territoryTypeSheet = DataManager.GetExcelSheet<TerritoryType>();
+            var contentFinderConditionSheet = DataManager.GetExcelSheet<ContentFinderCondition>();
+            this.presenceResolver = new PresenceResolver(territories, territoryTypeSheet, contentFinderConditionSheet);
 
             RichPresenceConfigWindow = new RichPresenceConfigWindow();
             DalamudPluginInterface.UiBuilder.Draw += RichPresenceConfigWindow.DrawRichPresenceConfigWindow;
             DalamudPluginInterface.UiBuilder.OpenConfigUi += RichPresenceConfigWindow.Open;
+            DalamudPluginInterface.UiBuilder.OpenMainUi += RichPresenceConfigWindow.Open;
 
-            Framework.Update += UpdateRichPresence;
+            Framework.Update += this.UpdateRichPresence;
+            ClientState.Login += this.State_Login;
+            ClientState.TerritoryChanged += this.State_TerritoryChanged;
+            ClientState.Logout += this.State_Logout;
 
-            ClientState.Login += State_Login;
-            ClientState.TerritoryChanged += State_TerritoryChanged;
-            ClientState.Logout += State_Logout;
+            this.RegisterCommand();
+            DalamudPluginInterface.LanguageChanged += this.ReregisterCommand;
 
-            RegisterCommand();
-            DalamudPluginInterface.LanguageChanged += ReregisterCommand;
+            this.MarkPresenceDirty(true);
+            RefreshPresenceNow();
+        }
 
-            Territories = DataManager.GetExcelSheet<TerritoryType>().ToList();
-
-            WorldSheet = DataManager.GetExcelSheet<World>();
-            TerritoryTypeSheet = DataManager.GetExcelSheet<TerritoryType>();
-            PlaceNameSheet = DataManager.GetExcelSheet<PlaceName>();
-            ClassJobSheet = DataManager.GetExcelSheet<ClassJob>();
-            OnlineStatusSheet = DataManager.GetExcelSheet<OnlineStatus>();
-            ContentFinderConditionSheet = DataManager.GetExcelSheet<ContentFinderCondition>();
-    }
-
-    public void Dispose()
+        public void Dispose()
         {
-            DalamudPluginInterface.LanguageChanged -= ReregisterCommand;
-            UnregisterCommand();
+            DalamudPluginInterface.LanguageChanged -= this.ReregisterCommand;
+            this.UnregisterCommand();
 
-            ClientState.Login -= State_Login;
-            ClientState.TerritoryChanged -= State_TerritoryChanged;
-            ClientState.Logout -= State_Logout;
+            ClientState.Login -= this.State_Login;
+            ClientState.TerritoryChanged -= this.State_TerritoryChanged;
+            ClientState.Logout -= this.State_Logout;
+            Framework.Update -= this.UpdateRichPresence;
 
-            Framework.Update -= UpdateRichPresence;
-
+            DalamudPluginInterface.UiBuilder.OpenMainUi -= RichPresenceConfigWindow.Open;
             DalamudPluginInterface.UiBuilder.OpenConfigUi -= RichPresenceConfigWindow.Open;
             DalamudPluginInterface.UiBuilder.Draw -= RichPresenceConfigWindow.DrawRichPresenceConfigWindow;
 
-            LocalizationManager?.Dispose();
+            LocalizationManager.Dispose();
 
             DiscordPresenceManager.ClearPresence();
-            DiscordPresenceManager?.Dispose();
+            DiscordPresenceManager.Dispose();
 
-            IpcManager?.Dispose();
+            IpcManager.Dispose();
+            activeInstance = null;
         }
 
-        private void SetDefaultPresence()
+        internal static void ApplyCurrentConfiguration(RichPresenceConfig config, bool saveToDisk)
         {
-            DiscordPresenceManager.SetPresence(DEFAULT_PRESENCE);
-            DiscordPresenceManager.UpdatePresenceDetails(LocalizationManager.Localize("DalamudRichPresenceInMenus", LocalizationLanguage.Client));
-            UpdateStartTime();
+            RichPresenceConfig = NormalizeConfig(config);
+            if (saveToDisk)
+            {
+                DalamudPluginInterface.SavePluginConfig(RichPresenceConfig);
+            }
+
+            DiscordPresenceManager.ApplyRuntimeConfig(RichPresenceConfig);
+            activeInstance?.MarkPresenceDirty(true);
+            RefreshPresenceNow(RichPresenceConfig);
+        }
+
+        internal static PresencePreviewSnapshot GetPresencePreviewSnapshot(RichPresenceConfig previewConfig)
+        {
+            if (activeInstance is null)
+            {
+                return new PresencePreviewSnapshot();
+            }
+
+            if (!Framework.IsInFrameworkUpdateThread)
+            {
+                activeInstance.QueuePreviewRefresh(CloneConfig(previewConfig));
+                return activeInstance.cachedPreviewSnapshot;
+            }
+
+            try
+            {
+                activeInstance.cachedPreviewSnapshot = activeInstance.BuildPresence(previewConfig).Preview;
+                return activeInstance.cachedPreviewSnapshot;
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Error(ex, "Could not build presence preview.");
+                return new PresencePreviewSnapshot();
+            }
+        }
+
+        internal static string GetTemplateTokenHelpText() => PresenceResolver.GetTemplateTokenHelpText();
+
+        internal static void RefreshPresenceNow(RichPresenceConfig? previewConfig = null)
+        {
+            if (activeInstance is null)
+            {
+                return;
+            }
+
+            if (!Framework.IsInFrameworkUpdateThread)
+            {
+                _ = Framework.RunOnFrameworkThread(() => RefreshPresenceNow(previewConfig));
+                return;
+            }
+
+            try
+            {
+                var buildResult = activeInstance.BuildPresence(previewConfig ?? RichPresenceConfig);
+                activeInstance.cachedPreviewSnapshot = buildResult.Preview;
+                activeInstance.OnPresenceRefreshed();
+                if (buildResult.ShouldClearPresence)
+                {
+                    DiscordPresenceManager.ClearPresence();
+                    return;
+                }
+
+                if (buildResult.Presence is not null)
+                {
+                    DiscordPresenceManager.SetPresence(buildResult.Presence);
+                }
+            }
+            catch (Exception ex)
+            {
+                PluginLog.Error(ex, "Could not refresh rich presence.");
+            }
+        }
+
+        internal static string GetStringSha256Hash(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            using var sha = SHA256.Create();
+            var textData = System.Text.Encoding.UTF8.GetBytes(text);
+            var hash = sha.ComputeHash(textData);
+            return BitConverter.ToString(hash).Replace("-", string.Empty, StringComparison.Ordinal);
+        }
+
+        private PresenceBuildResult BuildPresence(RichPresenceConfig config)
+        {
+            return this.presenceResolver.Build(config, this.startTime);
+        }
+
+        private void QueuePreviewRefresh(RichPresenceConfig previewConfig)
+        {
+            this.pendingPreviewConfig = previewConfig;
+            if (this.previewRefreshPending)
+            {
+                return;
+            }
+
+            this.previewRefreshPending = true;
+            _ = Framework.RunOnFrameworkThread(() =>
+            {
+                try
+                {
+                    while (this.pendingPreviewConfig is not null)
+                    {
+                        var latestPreviewConfig = this.pendingPreviewConfig;
+                        this.pendingPreviewConfig = null;
+                        this.cachedPreviewSnapshot = this.BuildPresence(latestPreviewConfig).Preview;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    PluginLog.Error(ex, "Could not refresh rich presence preview.");
+                    this.cachedPreviewSnapshot = new PresencePreviewSnapshot();
+                }
+                finally
+                {
+                    this.previewRefreshPending = false;
+                    if (this.pendingPreviewConfig is not null)
+                    {
+                        this.QueuePreviewRefresh(this.pendingPreviewConfig);
+                    }
+                }
+            });
+        }
+
+        private void MarkPresenceDirty(bool refreshImmediately)
+        {
+            this.presenceDirty = true;
+            if (refreshImmediately)
+            {
+                this.nextPresencePollAtUtc = DateTime.MinValue;
+            }
+        }
+
+        private void OnPresenceRefreshed()
+        {
+            this.presenceDirty = false;
+            this.nextPresencePollAtUtc = DateTime.UtcNow + PresencePollInterval;
         }
 
         private void UpdateStartTime()
         {
             if (RichPresenceConfig.ResetTimeWhenChangingZones)
             {
-                startTime = DateTime.UtcNow;
-            }
-
-            if (RichPresenceConfig.ShowStartTime)
-            {
-                DiscordPresenceManager.UpdatePresenceStartTime(startTime);
+                this.startTime = DateTime.UtcNow;
+                this.MarkPresenceDirty(true);
             }
         }
 
         private void State_Login()
         {
-            UpdateStartTime();
+            this.UpdateStartTime();
+            this.MarkPresenceDirty(true);
         }
 
         private void State_TerritoryChanged(ushort territoryId)
         {
-            UpdateStartTime();
+            this.UpdateStartTime();
+            this.MarkPresenceDirty(true);
         }
 
         private void State_Logout(int type, int code)
         {
-            // Parameters:
-            //   type:
-            //     The type of logout.
-            //
-            //   code:
-            //     The success/failure code
-
-            SetDefaultPresence();
-            UpdateStartTime();
+            this.UpdateStartTime();
+            this.MarkPresenceDirty(true);
         }
 
         private void ReregisterCommand(string langCode)
@@ -191,315 +302,133 @@ namespace Dalamud.RichPresence
 
         private void RegisterCommand()
         {
-            CommandManager.AddHandler("/prp",
+            CommandManager.AddHandler(
+                "/prp",
                 new CommandInfo((string cmd, string args) => RichPresenceConfigWindow.Toggle())
                 {
-                    HelpMessage = LocalizationManager.Localize("DalamudRichPresenceOpenConfiguration", LocalizationLanguage.Plugin)
-                }
-            );
+                    HelpMessage = LocalizationManager.Localize("DalamudRichPresenceOpenConfiguration", LocalizationLanguage.Plugin),
+                });
         }
 
-        private unsafe void UpdateRichPresence(IFramework framework)
+        private void UpdateRichPresence(IFramework framework)
         {
-            try
+            if (!this.presenceDirty && DateTime.UtcNow < this.nextPresencePollAtUtc)
             {
-                var localPlayer = ClientState.LocalPlayer;
-
-                // Show start timestamp if configured
-                var richPresenceTimestamps =
-                    RichPresenceConfig.ShowStartTime ? new Timestamps(startTime) : null;
-
-                DiscordRPC.RichPresence richPresence;
-
-                // Return early if data is not ready
-                if (localPlayer is null)
-                {
-                    // Show login queue information if configured
-                    if (!RichPresenceConfig.ShowLoginQueuePosition || !IpcManager.IsInLoginQueue())
-                    {
-                        // Reset to default presence if we have left the queue
-                        if (presenceInQueue)
-                        {
-                            presenceInQueue = false;
-                            SetDefaultPresence();
-                        }
-
-                        return;
-                    }
-
-                    var queuePosition = IpcManager.GetQueuePosition();
-                    if (queuePosition < 0)
-                    {
-                        // Position not yet loaded, so we wait
-                        return;
-                    }
-
-                    var queueEstimate = IpcManager.GetQueueEstimate();
-                    var queueEstimateFormatted = queueEstimate?.TotalSeconds >= 1d
-                        ? string.Format(
-                            LocalizationManager.Localize("DalamudRichPresenceQueueEstimate",
-                                LocalizationLanguage.Client), queueEstimate)
-                        : string.Empty;
-
-                    // Create rich presence object
-                    richPresence = new DiscordRPC.RichPresence
-                    {
-                        Details = string.Format(
-                            LocalizationManager.Localize("DalamudRichPresenceInLoginQueue",
-                                LocalizationLanguage.Client), queuePosition),
-                        State = queueEstimateFormatted,
-                        Assets = new Assets
-                        {
-                            LargeImageKey = DEFAULT_LARGE_IMAGE_KEY,
-                            SmallImageKey = DEFAULT_SMALL_IMAGE_KEY
-                        },
-                        Timestamps = richPresenceTimestamps
-                    };
-
-                    presenceInQueue = true;
-
-                    // Request new presence to be set
-                    DiscordPresenceManager.SetPresence(richPresence);
-
-                    return;
-                }
-
-                uint territoryId = ClientState.TerritoryType;
-                if (HousingInfo is not null && HousingInfo->IsInside())
-                {
-                    territoryId = TerritoryTypeSheet.GetRow(HousingManager.GetOriginalHouseTerritoryTypeId()).RowId;
-                }
-
-
-                var territoryName = LocalizationManager.Localize("DalamudRichPresenceTheSource", LocalizationLanguage.Client);
-                var territoryRegion = LocalizationManager.Localize("DalamudRichPresenceVoid", LocalizationLanguage.Client);
-
-                // Details defaults to player name
-                var richPresenceDetails = localPlayer.Name.ToString();
-
-                // State defaults to current world
-                var richPresenceState = localPlayer.CurrentWorld.Value.Name.ExtractText();
-
-                // append data center name if configured
-                if (RichPresenceConfig.ShowDataCenter)
-                {
-                    var dcName = localPlayer.CurrentWorld.Value.DataCenter.Value.Name.ExtractText();
-                    richPresenceState = $"{richPresenceState} ({dcName})";
-                }
-
-                // Large image defaults to world map
-                var richPresenceLargeImageText = territoryName;
-                var richPresenceLargeImageKey = DEFAULT_LARGE_IMAGE_KEY;
-
-                // Small image defaults to "Online"
-                var richPresenceSmallImageKey = DEFAULT_SMALL_IMAGE_KEY;
-                var richPresenceSmallImageText = LocalizationManager.Localize("DalamudRichPresenceOnline", LocalizationLanguage.Client);
-
-                if (territoryId != 0)
-                {
-                    // Read territory data from generated sheet
-                    var territory = this.Territories.First(row => row.RowId == territoryId);
-                    territoryName = territory.PlaceName.Value.Name.ExtractText() ?? LocalizationManager.Localize("DalamudRichPresenceUnknown", LocalizationLanguage.Client);
-                    territoryRegion = territory.PlaceNameRegion.Value.Name.ExtractText() ?? LocalizationManager.Localize("DalamudRichPresenceUnknown", LocalizationLanguage.Client);
-
-                    // Set large image to territory
-                    richPresenceLargeImageText = territoryName;
-                    richPresenceLargeImageKey = $"li_{territory.LoadingImage.RowId}";
-                }
-
-                // Show character name if configured
-                if (RichPresenceConfig.ShowName)
-                {
-                    //PluginLog.Info($"localPlayer.CurrentWorld: {localPlayer.CurrentWorld.RowId} {localPlayer.CurrentWorld.Value.Name}");
-                    //PluginLog.Info($"localPlayer.HomeWorld: {WorldSheet.GetRow(localPlayer.HomeWorld.RowId).Name} ");
-                    
-                    //TODO: Fix this
-
-                    // Show free company tag if configured and on home world
-                    if (RichPresenceConfig.ShowFreeCompany && localPlayer.CurrentWorld.RowId == localPlayer.HomeWorld.RowId)
-                    {
-                        var fcTag = localPlayer.CompanyTag.TextValue;
-                        richPresenceDetails = string.IsNullOrEmpty(fcTag) ? richPresenceDetails : $"{richPresenceDetails} «{fcTag}»";
-                    }
-
-                    // show home world in details - when visiting another world, or always if configured
-                    if (RichPresenceConfig.ShowWorld && localPlayer.CurrentWorld.RowId != localPlayer.HomeWorld.RowId)
-                    {
-                        richPresenceDetails = $"{richPresenceDetails} ❀ {localPlayer.HomeWorld.Value.Name}";
-                    }
-                    else if (RichPresenceConfig.AlwaysShowHomeWorld)
-                    {
-                        richPresenceDetails = $"{richPresenceDetails} ❀ {localPlayer.HomeWorld.Value.Name}";
-                    }
-                }
-                else
-                {
-                    // Replace character name with territory name
-                    richPresenceDetails = territoryName;
-                }
-
-                // Show current job if configured
-                if (RichPresenceConfig.ShowJob)
-                {
-                    // Set small image to job icon
-                    richPresenceSmallImageKey = $"class_{localPlayer.ClassJob.RowId}";
-
-                    // Abbreviate job name if configured
-                    richPresenceSmallImageText = RichPresenceConfig.AbbreviateJob
-                        ? localPlayer.ClassJob.Value.Abbreviation.ExtractText()
-                        : LocalizationManager.TitleCase(localPlayer.ClassJob.Value.Name.ExtractText());
-                    
-                    
-                    // Show current job level if configured
-                    if (RichPresenceConfig.ShowLevel)
-                    {
-                        var levelText = string.Format(LocalizationManager.Localize("DalamudRichPresenceLevel", LocalizationLanguage.Client), localPlayer.Level);
-                        richPresenceSmallImageText = $"{richPresenceSmallImageText} {levelText}";
-                    }
-                }
-
-                // Hide world name if configured
-                if (!RichPresenceConfig.ShowWorld)
-                {
-                    // Replace world name with territory name or territory region
-                    richPresenceState = RichPresenceConfig.ShowName ? territoryName : territoryRegion;
-                }
-
-                // Create rich presence object
-                richPresence = new DiscordRPC.RichPresence
-                {
-                    Details = richPresenceDetails,
-                    State = richPresenceState,
-                     Assets = new Assets
-                    {
-                        LargeImageKey = richPresenceLargeImageKey,
-                        LargeImageText = richPresenceLargeImageText,
-                        SmallImageKey = richPresenceSmallImageKey,
-                        SmallImageText = richPresenceSmallImageText,
-                    },
-                    Timestamps = richPresenceTimestamps,
-                };
-
-                if (RichPresenceConfig.ShowParty)
-                {
-                    if (PartyList.Length > 0 && PartyList.PartyId != 0)
-                    {
-                        var cfcTerri = ContentFinderConditionSheet!.FirstOrNull(x => x.TerritoryType.RowId == ClientState.TerritoryType);
-
-                        #if DEBUG
-                        if (cfcTerri != null)
-                        {
-                            PluginLog.Debug($"current CS Terri:{ClientState.TerritoryType}");
-                            PluginLog.Debug($"cfcTerriRow:{(cfcTerri.HasValue ? cfcTerri.Value.RowId : 9999999999)}");
-                            PluginLog.Debug($"cfcTerriContentMemberType:{cfcTerri?.ContentMemberType.Value}");
-                            PluginLog.Debug($"cfcTerriContentTypeRow:{cfcTerri?.ContentType.RowId}");
-                            PluginLog.Debug($"cfcTerriContentTypeRow:{cfcTerri?.ContentType.Value}");
-                        }
-                        #endif
-
-
-                        var partyMax = cfcTerri != null && cfcTerri?.ContentType.RowId == 2 ? 4 : 8;
-
-                        if (PartyList.Length > partyMax)
-                        {
-                            partyMax = PartyList.Length;
-                        }
-
-                        //if (cfcTerri != null)
-                        //{
-                            richPresence.State = LocalizationManager.Localize("DalamudRichPresenceInADuty", LocalizationLanguage.Client);
-                        //}
-
-                        var party = new Party
-                        {
-                            Size = PartyList.Length,
-                            Max = partyMax, // Check dungeon terris, change to 4
-                            ID = GetStringSha256Hash(PartyList.PartyId.ToString()),
-                        };
-
-                        richPresence.Party = party;
-                    }
-                    else
-                    {
-                        var ipCrossRealm = InfoProxyCrossRealm.Instance();
-
-                        if (ipCrossRealm->IsInCrossRealmParty)
-                        {
-                            var numMembers =
-                                InfoProxyCrossRealm.GetGroupMemberCount(ipCrossRealm->LocalPlayerGroupIndex);
-
-                            if (numMembers > 0)
-                            {
-                                var memberAry = new CrossRealmMember[numMembers];
-                                for (var i = 0u; i < numMembers; i++)
-                                {
-                                    memberAry[i] = *InfoProxyCrossRealm.GetGroupMember(i, ipCrossRealm->LocalPlayerGroupIndex);
-                                }
-
-                                var lowestCid = memberAry.OrderBy(x => x.ContentId).Select(x => x.ContentId).First();
-
-                                richPresence.Party = new Party
-                                {
-                                    Size = numMembers,
-                                    Max = 8,
-                                    ID = GetStringSha256Hash(lowestCid.ToString()),
-                                };
-                            }
-                        }
-                    }
-                }
-
-
-                // var onlineStatusEn = localPlayer.OnlineStatus.GetWithLanguage(ClientLanguage.English);
-                // var isAfk = onlineStatusEn != null && onlineStatusEn.Name.RawString.Contains("Away from Keyboard");
-                // Data.GetExcelSheet<Item>(ClientLanguage.English);
-                var OnlineStatusSheetEn = DataManager.GetExcelSheet<OnlineStatus>(ClientLanguage.English);
-                var onlineStatusEn = OnlineStatusSheetEn.GetRow(localPlayer.OnlineStatus.RowId).Name.ExtractText();
-                var isAfk = onlineStatusEn != null && onlineStatusEn.Contains("Away from Keyboard");
-                if (RichPresenceConfig.ShowAfk && isAfk)
-                {
-                    var text = onlineStatusEn;
-                    richPresence.State = text;
-                    richPresence.Assets.SmallImageKey = "away";
-                }
-
-                // hide presence in cutscenes to avoid zone spoilers
-                var inCutscene = Condition[ConditionFlag.OccupiedInCutSceneEvent]
-                    || Condition[ConditionFlag.WatchingCutscene]
-                    || Condition[ConditionFlag.WatchingCutscene78];
-                if (RichPresenceConfig.HideInCutscene && inCutscene)
-                {
-                    DiscordPresenceManager.ClearPresence();
-                    return;
-                }
-
-                if (RichPresenceConfig.HideEntirelyWhenAfk && isAfk)
-                {
-                    DiscordPresenceManager.ClearPresence();
-                }
-                else
-                {
-                    // Request new presence to be set
-                    DiscordPresenceManager.SetPresence(richPresence);
-                }
+                return;
             }
-            catch (Exception ex)
-            {
-                PluginLog.Error(ex, "Could not run OnUpdate.");
-            }
+
+            RefreshPresenceNow();
         }
 
-        internal static string GetStringSha256Hash(string text)
+        private static RichPresenceConfig CloneConfig(RichPresenceConfig source)
         {
-            if (string.IsNullOrEmpty(text))
+            return new RichPresenceConfig
             {
-                return string.Empty;
+                Version = source.Version,
+                ShowLoginQueuePosition = source.ShowLoginQueuePosition,
+                ShowName = source.ShowName,
+                ShowFreeCompany = source.ShowFreeCompany,
+                ShowWorld = source.ShowWorld,
+                AlwaysShowHomeWorld = source.AlwaysShowHomeWorld,
+                ShowDataCenter = source.ShowDataCenter,
+                UseCustomLargeImage = source.UseCustomLargeImage,
+                CustomLargeImageUrl = source.CustomLargeImageUrl,
+                HideLargeImage = source.HideLargeImage,
+                UseCustomLargeImageText = source.UseCustomLargeImageText,
+                CustomLargeImageTextTemplate = source.CustomLargeImageTextTemplate,
+                UseCustomDetailsText = source.UseCustomDetailsText,
+                CustomDetailsText = source.CustomDetailsText,
+                UseCustomStateText = source.UseCustomStateText,
+                CustomStateText = source.CustomStateText,
+                HideSmallImage = source.HideSmallImage,
+                UseCustomSmallImage = source.UseCustomSmallImage,
+                CustomSmallImageUrl = source.CustomSmallImageUrl,
+                UseCustomSmallImageText = source.UseCustomSmallImageText,
+                CustomSmallImageTextTemplate = source.CustomSmallImageTextTemplate,
+                LocationPrivacyMode = source.LocationPrivacyMode,
+                MenuOverride = CloneContextOverride(source.MenuOverride),
+                QueueOverride = CloneContextOverride(source.QueueOverride),
+                OpenWorldOverride = CloneContextOverride(source.OpenWorldOverride),
+                HousingOverride = CloneContextOverride(source.HousingOverride),
+                DutyOverride = CloneContextOverride(source.DutyOverride),
+                AfkOverride = CloneContextOverride(source.AfkOverride),
+                JobOverrides = CloneJobOverrides(source.JobOverrides),
+                ShowStartTime = source.ShowStartTime,
+                ResetTimeWhenChangingZones = source.ResetTimeWhenChangingZones,
+                ShowJob = source.ShowJob,
+                AbbreviateJob = source.AbbreviateJob,
+                ShowLevel = source.ShowLevel,
+                ShowParty = source.ShowParty,
+                ShowAfk = source.ShowAfk,
+                HideEntirelyWhenAfk = source.HideEntirelyWhenAfk,
+                HideInCutscene = source.HideInCutscene,
+                RPCBridgeEnabled = source.RPCBridgeEnabled,
+            };
+        }
+
+        private static RichPresenceConfig NormalizeConfig(RichPresenceConfig config)
+        {
+            config.MenuOverride ??= new PresenceContextOverride();
+            config.QueueOverride ??= new PresenceContextOverride();
+            config.OpenWorldOverride ??= new PresenceContextOverride();
+            config.HousingOverride ??= new PresenceContextOverride();
+            config.DutyOverride ??= new PresenceContextOverride();
+            config.AfkOverride ??= new PresenceContextOverride();
+            config.JobOverrides ??= [];
+            config.Version = CurrentConfigVersion;
+            return config;
+        }
+
+        private static PresenceContextOverride CloneContextOverride(PresenceContextOverride source)
+        {
+            return new PresenceContextOverride
+            {
+                Enabled = source.Enabled,
+                LocationPrivacyMode = source.LocationPrivacyMode,
+                UseDetailsTemplate = source.UseDetailsTemplate,
+                DetailsTemplate = source.DetailsTemplate,
+                UseStateTemplate = source.UseStateTemplate,
+                StateTemplate = source.StateTemplate,
+                LargeImageMode = source.LargeImageMode,
+                LargeImageUrl = source.LargeImageUrl,
+                UseLargeImageTextTemplate = source.UseLargeImageTextTemplate,
+                LargeImageTextTemplate = source.LargeImageTextTemplate,
+                SmallImageMode = source.SmallImageMode,
+                SmallImageUrl = source.SmallImageUrl,
+                UseSmallImageTextTemplate = source.UseSmallImageTextTemplate,
+                SmallImageTextTemplate = source.SmallImageTextTemplate,
+                HideParty = source.HideParty,
+            };
+        }
+
+        private static List<PresenceJobOverride> CloneJobOverrides(List<PresenceJobOverride> source)
+        {
+            var clonedOverrides = new List<PresenceJobOverride>(source.Count);
+            foreach (var jobOverride in source)
+            {
+                clonedOverrides.Add(new PresenceJobOverride
+                {
+                    Label = jobOverride.Label,
+                    JobIds = [.. jobOverride.JobIds],
+                    Enabled = jobOverride.Enabled,
+                    LocationPrivacyMode = jobOverride.LocationPrivacyMode,
+                    UseDetailsTemplate = jobOverride.UseDetailsTemplate,
+                    DetailsTemplate = jobOverride.DetailsTemplate,
+                    UseStateTemplate = jobOverride.UseStateTemplate,
+                    StateTemplate = jobOverride.StateTemplate,
+                    LargeImageMode = jobOverride.LargeImageMode,
+                    LargeImageUrl = jobOverride.LargeImageUrl,
+                    UseLargeImageTextTemplate = jobOverride.UseLargeImageTextTemplate,
+                    LargeImageTextTemplate = jobOverride.LargeImageTextTemplate,
+                    SmallImageMode = jobOverride.SmallImageMode,
+                    SmallImageUrl = jobOverride.SmallImageUrl,
+                    UseSmallImageTextTemplate = jobOverride.UseSmallImageTextTemplate,
+                    SmallImageTextTemplate = jobOverride.SmallImageTextTemplate,
+                    HideParty = jobOverride.HideParty,
+                });
             }
 
-            using var sha = SHA256.Create();
-            var textData = System.Text.Encoding.UTF8.GetBytes(text);
-            var hash = sha.ComputeHash(textData);
-            return BitConverter.ToString(hash).Replace("-", string.Empty);
+            return clonedOverrides;
         }
     }
 }

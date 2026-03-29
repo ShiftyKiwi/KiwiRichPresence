@@ -11,66 +11,59 @@ namespace Dalamud.RichPresence.Managers
 {
     internal class LocalizationManager : IDisposable
     {
-        private CultureInfo clientCultureInfo;
-        private Dictionary<string, LocalizationEntry> clientLocalizationDictonary;
-        private Dictionary<string, LocalizationEntry> pluginLocalizationDictionary;
-        private readonly Dictionary<string, LocalizationEntry> defaultLocalizationDictionary;
-
         private const string PREFIX = "dalamud_richpresence_";
         private const string DEFAULT_DICT_LANGCODE = "en";
+
+        private CultureInfo clientCultureInfo = CultureInfo.InvariantCulture;
+        private Dictionary<string, LocalizationEntry> clientLocalizationDictonary = new();
+        private Dictionary<string, LocalizationEntry> pluginLocalizationDictionary = new();
+        private readonly Dictionary<string, LocalizationEntry> defaultLocalizationDictionary;
 
         public LocalizationManager()
         {
             this.ReadClientLanguageLocFile(ClientLanguageToLangCode(RichPresencePlugin.ClientState.ClientLanguage));
             this.ReadPluginLanguageLocFile(RichPresencePlugin.DalamudPluginInterface.UiLanguage);
-            this.defaultLocalizationDictionary = ReadFileWithLangCode(DEFAULT_DICT_LANGCODE);
-            RichPresencePlugin.DalamudPluginInterface.LanguageChanged += ReadPluginLanguageLocFile;
+            this.defaultLocalizationDictionary = this.ReadFileWithLangCode(DEFAULT_DICT_LANGCODE);
+            RichPresencePlugin.DalamudPluginInterface.LanguageChanged += this.ReadPluginLanguageLocFile;
         }
 
         public string Localize(string localizationStringKey, LocalizationLanguage localizationSource)
         {
-            LocalizationEntry dictValue;
-            bool entryFound;
+            LocalizationEntry? dictValue;
+            var entryFound = localizationSource == LocalizationLanguage.Client
+                ? this.clientLocalizationDictonary.TryGetValue(localizationStringKey, out dictValue)
+                : this.pluginLocalizationDictionary.TryGetValue(localizationStringKey, out dictValue);
 
-            if (localizationSource == LocalizationLanguage.Client)
-            {
-                entryFound = clientLocalizationDictonary.TryGetValue(localizationStringKey, out dictValue);
-            }
-            else
-            {
-                entryFound = pluginLocalizationDictionary.TryGetValue(localizationStringKey, out dictValue);
-            }
-
-            if (entryFound && !string.IsNullOrEmpty(dictValue.Message))
+            if (entryFound && !string.IsNullOrEmpty(dictValue?.Message))
             {
                 return dictValue.Message;
             }
-            else
-            {
-                _ = defaultLocalizationDictionary.TryGetValue(localizationStringKey, out dictValue);
-                return dictValue.Message;
-            }
+
+            return this.defaultLocalizationDictionary.TryGetValue(localizationStringKey, out dictValue)
+                && !string.IsNullOrEmpty(dictValue?.Message)
+                ? dictValue.Message
+                : localizationStringKey;
         }
 
-        public string TitleCase(string input) => clientCultureInfo.TextInfo.ToTitleCase(input);
+        public string TitleCase(string input) => this.clientCultureInfo.TextInfo.ToTitleCase(input);
 
         public void Dispose()
         {
-            RichPresencePlugin.DalamudPluginInterface.LanguageChanged -= ReadPluginLanguageLocFile;
+            RichPresencePlugin.DalamudPluginInterface.LanguageChanged -= this.ReadPluginLanguageLocFile;
         }
 
         private void ReadClientLanguageLocFile(string langCode)
         {
             RichPresencePlugin.PluginLog.Debug("Loading client localization file...");
-            clientLocalizationDictonary = this.ReadFileWithLangCode(langCode);
-            clientCultureInfo = new CultureInfo(langCode);
+            this.clientLocalizationDictonary = this.ReadFileWithLangCode(langCode);
+            this.clientCultureInfo = new CultureInfo(langCode);
             RichPresencePlugin.PluginLog.Debug("Client localization file loaded.");
         }
 
         private void ReadPluginLanguageLocFile(string langCode)
         {
             RichPresencePlugin.PluginLog.Debug("Loading plugin localization file...");
-            pluginLocalizationDictionary = ReadFileWithLangCode(langCode);
+            this.pluginLocalizationDictionary = this.ReadFileWithLangCode(langCode);
             RichPresencePlugin.PluginLog.Debug("Plugin localization file loaded.");
         }
 
@@ -79,39 +72,34 @@ namespace Dalamud.RichPresence.Managers
             try
             {
                 RichPresencePlugin.PluginLog.Debug($"Reading localization file with language code {langCode}...");
-                return JsonConvert.DeserializeObject<Dictionary<string, LocalizationEntry>>(
-                    File.ReadAllText(Path.Combine(
-                        RichPresencePlugin.DalamudPluginInterface.AssemblyLocation.DirectoryName,
-                        "Resources",
-                        "loc",
-                        $"{PREFIX}{langCode}.json"
-                    ))
-                );
+                return this.ReadLocalizationFile(langCode);
             }
             catch (Exception ex)
             {
                 RichPresencePlugin.PluginLog.Error(ex, $"File with language code {langCode} not loaded, using fallbacks...");
-                return JsonConvert.DeserializeObject<Dictionary<string, LocalizationEntry>>(
-                    File.ReadAllText(Path.Combine(
-                        RichPresencePlugin.DalamudPluginInterface.AssemblyLocation.DirectoryName,
-                        "Resources",
-                        "loc",
-                        $"{PREFIX}{DEFAULT_DICT_LANGCODE}.json"
-                    ))
-                );
+                return this.ReadLocalizationFile(DEFAULT_DICT_LANGCODE);
             }
+        }
+
+        private Dictionary<string, LocalizationEntry> ReadLocalizationFile(string langCode)
+        {
+            var assemblyDirectory = RichPresencePlugin.DalamudPluginInterface.AssemblyLocation.DirectoryName
+                ?? throw new InvalidOperationException("Unable to resolve plugin assembly directory.");
+            var locFilePath = Path.Combine(assemblyDirectory, "Resources", "loc", $"{PREFIX}{langCode}.json");
+
+            return JsonConvert.DeserializeObject<Dictionary<string, LocalizationEntry>>(File.ReadAllText(locFilePath))
+                ?? new Dictionary<string, LocalizationEntry>();
         }
 
         private string ClientLanguageToLangCode(ClientLanguage clientLanguage)
         {
-            string langCode = clientLanguage switch
+            return clientLanguage switch
             {
                 ClientLanguage.Japanese => "ja",
                 ClientLanguage.German => "de",
                 ClientLanguage.French => "fr",
-                _ => "en"
+                _ => "en",
             };
-            return langCode;
         }
     }
 }
