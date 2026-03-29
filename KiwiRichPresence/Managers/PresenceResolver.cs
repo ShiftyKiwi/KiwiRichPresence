@@ -10,10 +10,10 @@ using FFXIVClientStructs.FFXIV.Client.UI.Info;
 using Lumina.Excel.Sheets;
 using Lumina.Extensions;
 
-using Dalamud.RichPresence.Configuration;
-using Dalamud.RichPresence.Models;
+using KiwiRichPresence.Configuration;
+using KiwiRichPresence.Models;
 
-namespace Dalamud.RichPresence.Managers
+namespace KiwiRichPresence.Managers
 {
     internal sealed unsafe class PresenceResolver
     {

@@ -5,9 +5,9 @@ using System.IO;
 using Dalamud.Game;
 using Newtonsoft.Json;
 
-using Dalamud.RichPresence.Models;
+using KiwiRichPresence.Models;
 
-namespace Dalamud.RichPresence.Managers
+namespace KiwiRichPresence.Managers
 {
     internal class LocalizationManager : IDisposable
     {

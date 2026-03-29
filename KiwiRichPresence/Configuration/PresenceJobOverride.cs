@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Dalamud.RichPresence.Configuration
+namespace KiwiRichPresence.Configuration
 {
     internal class PresenceJobOverride : PresenceContextOverride
     {

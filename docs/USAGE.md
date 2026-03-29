@@ -138,5 +138,5 @@ This is a heavily modified fork and should not be treated as the official Dalamu
 
 Use this repository for support:
 
-- <https://github.com/ShiftyKiwi/Dalamud.RichPresence>
-- <https://github.com/ShiftyKiwi/Dalamud.RichPresence/issues>
+- <https://github.com/ShiftyKiwi/KiwiRichPresence>
+- <https://github.com/ShiftyKiwi/KiwiRichPresence/issues>

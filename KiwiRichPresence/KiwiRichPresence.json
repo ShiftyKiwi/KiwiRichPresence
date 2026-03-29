@@ -4,7 +4,7 @@
   "Description": "Forked and expanded Discord Rich Presence for FFXIV with templates, job/context presets, custom images, privacy controls, and live preview tools.",
   "Punchline": "Customizable Discord Rich Presence for FFXIV",
   "InternalName": "KiwiRichPresence",
-  "RepoUrl": "https://github.com/ShiftyKiwi/Dalamud.RichPresence",
+  "RepoUrl": "https://github.com/ShiftyKiwi/KiwiRichPresence",
   "Tags": [
     "Discord",
     "Rich Presence",

@@ -1,9 +1,10 @@
 # Changelog
 
-## 3.0.0.0
+## 3.0.1.0
 
 - Fork shipping release under the `KiwiRichPresence` identity
 - Unique internal name for fork/pluginmaster distribution
+- Renamed the project layout, solution, and build outputs around `KiwiRichPresence`
 - Updated install metadata and support policy for the fork
 - Added user-facing install and usage documentation
 - Preserved the expanded customization feature set:

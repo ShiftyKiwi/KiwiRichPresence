@@ -1,6 +1,6 @@
-using Dalamud.RichPresence.Models;
+using KiwiRichPresence.Models;
 
-namespace Dalamud.RichPresence.Configuration
+namespace KiwiRichPresence.Configuration
 {
     internal class PresenceContextOverride
     {

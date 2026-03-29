@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using Dalamud.Configuration;
-using Dalamud.RichPresence.Models;
+using KiwiRichPresence.Models;
 
-namespace Dalamud.RichPresence.Configuration
+namespace KiwiRichPresence.Configuration
 {
     internal class RichPresenceConfig : IPluginConfiguration
     {

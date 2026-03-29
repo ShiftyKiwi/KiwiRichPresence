@@ -9,12 +9,12 @@ using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Lumina.Excel.Sheets;
 
-using Dalamud.RichPresence.Configuration;
-using Dalamud.RichPresence.Interface;
-using Dalamud.RichPresence.Managers;
-using Dalamud.RichPresence.Models;
+using KiwiRichPresence.Configuration;
+using KiwiRichPresence.Interface;
+using KiwiRichPresence.Managers;
+using KiwiRichPresence.Models;
 
-namespace Dalamud.RichPresence
+namespace KiwiRichPresence
 {
     internal unsafe class RichPresencePlugin : IDalamudPlugin, IDisposable
     {

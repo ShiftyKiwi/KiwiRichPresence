@@ -10,10 +10,10 @@ using Dalamud.Utility;
 using Lumina.Excel.Sheets;
 using Lumina.Extensions;
 
-using Dalamud.RichPresence.Configuration;
-using Dalamud.RichPresence.Models;
+using KiwiRichPresence.Configuration;
+using KiwiRichPresence.Models;
 
-namespace Dalamud.RichPresence.Interface
+namespace KiwiRichPresence.Interface
 {
     internal class RichPresenceConfigWindow
     {

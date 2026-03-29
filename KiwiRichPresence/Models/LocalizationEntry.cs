@@ -1,6 +1,6 @@
 using Newtonsoft.Json;
 
-namespace Dalamud.RichPresence.Models
+namespace KiwiRichPresence.Models
 {
     internal class LocalizationEntry
     {

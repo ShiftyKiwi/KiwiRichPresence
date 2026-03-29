@@ -1,4 +1,4 @@
-namespace Dalamud.RichPresence.Models
+namespace KiwiRichPresence.Models
 {
     internal enum PresenceImageOverrideMode
     {

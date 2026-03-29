@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$projectDir = Join-Path $repoRoot "Dalamud.RichPresence"
+$projectDir = Join-Path $repoRoot "KiwiRichPresence"
 $releaseRoot = Join-Path $repoRoot "artifacts\\release"
 $buildRoot = Join-Path $projectDir "bin\\x64\\$Configuration"
 $manifestPath = Join-Path $buildRoot "KiwiRichPresence.json"
@@ -15,8 +15,8 @@ if (Test-Path -LiteralPath $buildRoot) {
     Remove-Item -LiteralPath $buildRoot -Recurse -Force
 }
 
-dotnet clean (Join-Path $repoRoot "Dalamud.RichPresence.sln") -c $Configuration
-dotnet build (Join-Path $repoRoot "Dalamud.RichPresence.sln") -c $Configuration
+dotnet clean (Join-Path $repoRoot "KiwiRichPresence.sln") -c $Configuration
+dotnet build (Join-Path $repoRoot "KiwiRichPresence.sln") -c $Configuration
 
 if (-not (Test-Path -LiteralPath $manifestPath)) {
     throw "Built manifest not found at $manifestPath"

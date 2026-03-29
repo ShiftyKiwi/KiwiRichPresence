@@ -5,7 +5,7 @@ using Dalamud.Utility;
 using DiscordRPC;
 using DiscordRPC.Logging;
 
-namespace Dalamud.RichPresence.Managers
+namespace KiwiRichPresence.Managers
 {
     internal class DiscordPresenceManager : IDisposable
     {
@@ -46,7 +46,7 @@ namespace Dalamud.RichPresence.Managers
             }
         }
 
-        public void ApplyRuntimeConfig(RichPresence.Configuration.RichPresenceConfig config)
+        public void ApplyRuntimeConfig(KiwiRichPresence.Configuration.RichPresenceConfig config)
         {
             if (!Util.IsWine())
             {

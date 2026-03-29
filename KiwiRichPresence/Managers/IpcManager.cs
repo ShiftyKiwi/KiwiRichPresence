@@ -2,7 +2,7 @@ using System;
 using Dalamud.Plugin.Ipc;
 using Dalamud.Plugin.Ipc.Exceptions;
 
-namespace Dalamud.RichPresence.Managers
+namespace KiwiRichPresence.Managers
 {
     internal class IpcManager : IDisposable
     {

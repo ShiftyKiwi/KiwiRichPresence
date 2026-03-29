@@ -1,8 +1,9 @@
 ﻿<Project Sdk="Dalamud.NET.Sdk/14.0.1">
 	<PropertyGroup>
         <AssemblyName>KiwiRichPresence</AssemblyName>
+        <RootNamespace>KiwiRichPresence</RootNamespace>
         <NoWarn>IDE0003</NoWarn>
-        <AssemblyVersion>3.0.0.0</AssemblyVersion>
+        <AssemblyVersion>3.0.1.0</AssemblyVersion>
 		<TargetFramework>net10.0-windows</TargetFramework>
     </PropertyGroup>
     <PropertyGroup Label="Documentation">
