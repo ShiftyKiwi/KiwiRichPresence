@@ -58,6 +58,20 @@ Typical uses:
 
 Job presets are checked in top-to-bottom order. The first enabled preset that matches your current job is used.
 
+## Zone Presets
+
+Zone presets let you target one or more specific FFXIV territories and apply a custom Rich Presence profile when you enter them.
+
+Typical uses:
+
+- use one large image only in PvP zones
+- give one city, raid, or housing area its own look
+- hide party data or reduce location precision in selected territories
+
+The zone selector supports search, bulk selection for filtered results, and a shortcut to select your current zone.
+
+Zone presets are checked in top-to-bottom order. The first enabled preset that matches your current territory is used.
+
 ## Template Tokens
 
 Text fields can use template tokens so your status updates dynamically instead of staying fully static.
@@ -106,7 +120,7 @@ Location display can be tuned at a high level:
 - `Region only`
 - `Generic area`
 
-That lets you choose between maximum detail and lighter privacy. Context presets and job presets can further override the global privacy mode when needed.
+That lets you choose between maximum detail and lighter privacy. Job, context, and zone presets can further override the global privacy mode when needed.
 
 ## Preview and Apply/Test Behavior
 
@@ -129,6 +143,8 @@ At a high level, the plugin resolves presence in this order:
 2. Global overrides
 3. First matching enabled job preset
 4. Matching enabled context preset
+5. First matching enabled zone preset
+6. Matching enabled AFK preset, if AFK is active and AFK display is enabled
 
 If a more specific layer changes the same field, it wins over the earlier layer.
 

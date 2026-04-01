@@ -19,7 +19,7 @@ namespace KiwiRichPresence
     internal unsafe class RichPresencePlugin : IDalamudPlugin, IDisposable
     {
         private static readonly TimeSpan PresencePollInterval = TimeSpan.FromSeconds(2);
-        private const int CurrentConfigVersion = 2;
+        private const int CurrentConfigVersion = 3;
 
         [PluginService]
         internal static IDalamudPluginInterface DalamudPluginInterface { get; private set; } = null!;
@@ -353,6 +353,7 @@ namespace KiwiRichPresence
                 DutyOverride = CloneContextOverride(source.DutyOverride),
                 AfkOverride = CloneContextOverride(source.AfkOverride),
                 JobOverrides = CloneJobOverrides(source.JobOverrides),
+                ZoneOverrides = CloneZoneOverrides(source.ZoneOverrides),
                 ShowStartTime = source.ShowStartTime,
                 ResetTimeWhenChangingZones = source.ResetTimeWhenChangingZones,
                 ShowJob = source.ShowJob,
@@ -375,6 +376,7 @@ namespace KiwiRichPresence
             config.DutyOverride ??= new PresenceContextOverride();
             config.AfkOverride ??= new PresenceContextOverride();
             config.JobOverrides ??= [];
+            config.ZoneOverrides ??= [];
             config.Version = CurrentConfigVersion;
             return config;
         }
@@ -425,6 +427,36 @@ namespace KiwiRichPresence
                     UseSmallImageTextTemplate = jobOverride.UseSmallImageTextTemplate,
                     SmallImageTextTemplate = jobOverride.SmallImageTextTemplate,
                     HideParty = jobOverride.HideParty,
+                });
+            }
+
+            return clonedOverrides;
+        }
+
+        private static List<PresenceZoneOverride> CloneZoneOverrides(List<PresenceZoneOverride> source)
+        {
+            var clonedOverrides = new List<PresenceZoneOverride>(source.Count);
+            foreach (var zoneOverride in source)
+            {
+                clonedOverrides.Add(new PresenceZoneOverride
+                {
+                    Label = zoneOverride.Label,
+                    TerritoryIds = [.. zoneOverride.TerritoryIds],
+                    Enabled = zoneOverride.Enabled,
+                    LocationPrivacyMode = zoneOverride.LocationPrivacyMode,
+                    UseDetailsTemplate = zoneOverride.UseDetailsTemplate,
+                    DetailsTemplate = zoneOverride.DetailsTemplate,
+                    UseStateTemplate = zoneOverride.UseStateTemplate,
+                    StateTemplate = zoneOverride.StateTemplate,
+                    LargeImageMode = zoneOverride.LargeImageMode,
+                    LargeImageUrl = zoneOverride.LargeImageUrl,
+                    UseLargeImageTextTemplate = zoneOverride.UseLargeImageTextTemplate,
+                    LargeImageTextTemplate = zoneOverride.LargeImageTextTemplate,
+                    SmallImageMode = zoneOverride.SmallImageMode,
+                    SmallImageUrl = zoneOverride.SmallImageUrl,
+                    UseSmallImageTextTemplate = zoneOverride.UseSmallImageTextTemplate,
+                    SmallImageTextTemplate = zoneOverride.SmallImageTextTemplate,
+                    HideParty = zoneOverride.HideParty,
                 });
             }
 

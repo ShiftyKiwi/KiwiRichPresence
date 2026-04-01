@@ -101,7 +101,17 @@ namespace KiwiRichPresence.Managers
                         AutoSmallImageText = RichPresencePlugin.LocalizationManager.Localize("DalamudRichPresenceOnline", LocalizationLanguage.Client),
                     };
 
-                    return Finalize(config, queueData, timestamps, false);
+                    return Finalize(
+                        config,
+                        queueData,
+                        timestamps,
+                        false,
+                        null,
+                        null,
+                        GetContextOverride(config, PresenceContextType.Queue),
+                        null,
+                        "Login Queue",
+                        null);
                 }
             }
 
@@ -120,7 +130,17 @@ namespace KiwiRichPresence.Managers
                 AutoSmallImageText = RichPresencePlugin.LocalizationManager.Localize("DalamudRichPresenceOnline", LocalizationLanguage.Client),
             };
 
-            return Finalize(config, menuData, timestamps, false);
+            return Finalize(
+                config,
+                menuData,
+                timestamps,
+                false,
+                null,
+                null,
+                GetContextOverride(config, PresenceContextType.Menu),
+                null,
+                "Menus",
+                null);
         }
 
         private PresenceBuildResult BuildLoggedIn(RichPresenceConfig config, Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter localPlayer, Timestamps? timestamps)
@@ -137,9 +157,13 @@ namespace KiwiRichPresence.Managers
             var isAfk = this.afkOnlineStatusRowId != 0
                 ? localPlayer.OnlineStatus.RowId == this.afkOnlineStatusRowId
                 : onlineStatusEn.Contains("Away from Keyboard", StringComparison.Ordinal);
-            var contextType = DetermineContextType(config, isAfk, isHousing, isDuty);
-            var contextOverride = GetContextOverride(config, contextType);
-            var privacyMode = ResolvePrivacyMode(config, contextOverride);
+            var baseContextType = DetermineBaseContextType(isHousing, isDuty);
+            var contextType = DetermineContextType(config, isAfk, baseContextType);
+            var standardContextOverride = GetContextOverride(config, baseContextType);
+            var afkOverride = contextType == PresenceContextType.Afk ? GetContextOverride(config, PresenceContextType.Afk) : null;
+            var jobOverride = FindMatchingJobOverride(config, localPlayer.ClassJob.RowId);
+            var zoneOverride = FindMatchingZoneOverride(config, resolvedTerritoryId);
+            var privacyMode = ResolvePrivacyMode(config, jobOverride, standardContextOverride, zoneOverride, afkOverride);
 
             var territoryName = RichPresencePlugin.LocalizationManager.Localize("DalamudRichPresenceTheSource", LocalizationLanguage.Client);
             var territoryRegion = RichPresencePlugin.LocalizationManager.Localize("DalamudRichPresenceVoid", LocalizationLanguage.Client);
@@ -240,6 +264,7 @@ namespace KiwiRichPresence.Managers
                 World = localPlayer.CurrentWorld.Value.Name.ExtractText(),
                 HomeWorld = localPlayer.HomeWorld.Value.Name.ExtractText(),
                 DataCenter = localPlayer.CurrentWorld.Value.DataCenter.Value.Name.ExtractText(),
+                TerritoryId = resolvedTerritoryId,
                 Zone = territoryName,
                 Region = territoryRegion,
                 Location = location,
@@ -267,15 +292,34 @@ namespace KiwiRichPresence.Managers
                 || RichPresencePlugin.Condition[ConditionFlag.WatchingCutscene78];
             var clearPresence = (config.HideInCutscene && inCutscene) || (config.HideEntirelyWhenAfk && isAfk);
 
-            return Finalize(config, data, timestamps, clearPresence);
+            return Finalize(
+                config,
+                data,
+                timestamps,
+                clearPresence,
+                jobOverride,
+                zoneOverride,
+                standardContextOverride,
+                afkOverride,
+                GetContextLabel(baseContextType),
+                contextType == PresenceContextType.Afk ? GetContextLabel(PresenceContextType.Afk) : null);
         }
 
-        private PresenceBuildResult Finalize(RichPresenceConfig config, PresenceContextData data, Timestamps? timestamps, bool clearPresence)
+        private PresenceBuildResult Finalize(
+            RichPresenceConfig config,
+            PresenceContextData data,
+            Timestamps? timestamps,
+            bool clearPresence,
+            PresenceJobOverride? jobOverride,
+            PresenceZoneOverride? zoneOverride,
+            PresenceContextOverride? standardContextOverride,
+            PresenceContextOverride? finalContextOverride,
+            string? standardContextLabel,
+            string? finalContextLabel)
         {
             var presence = CreateAutoPresence(data, timestamps);
             ApplyGlobalOverrides(config, data, presence);
 
-            var jobOverride = FindMatchingJobOverride(config, data.JobId);
             if (jobOverride is not null)
             {
                 ApplyContextOverride(jobOverride, data, presence);
@@ -285,11 +329,28 @@ namespace KiwiRichPresence.Managers
                 }
             }
 
-            var contextOverride = GetContextOverride(config, data.ContextType);
-            if (contextOverride.Enabled)
+            if (standardContextOverride?.Enabled == true)
             {
-                ApplyContextOverride(contextOverride, data, presence);
-                if (contextOverride.HideParty)
+                ApplyContextOverride(standardContextOverride, data, presence);
+                if (standardContextOverride.HideParty)
+                {
+                    presence.Party = null!;
+                }
+            }
+
+            if (zoneOverride is not null)
+            {
+                ApplyContextOverride(zoneOverride, data, presence);
+                if (zoneOverride.HideParty)
+                {
+                    presence.Party = null!;
+                }
+            }
+
+            if (finalContextOverride?.Enabled == true)
+            {
+                ApplyContextOverride(finalContextOverride, data, presence);
+                if (finalContextOverride.HideParty)
                 {
                     presence.Party = null!;
                 }
@@ -303,7 +364,7 @@ namespace KiwiRichPresence.Managers
                 {
                     IsAvailable = true,
                     ContextLabel = data.ContextLabel,
-                    ActivePresetLabel = BuildActivePresetLabel(jobOverride, contextOverride, data.ContextLabel),
+                    ActivePresetLabel = BuildActivePresetLabel(jobOverride, zoneOverride, standardContextOverride, finalContextOverride, standardContextLabel, finalContextLabel),
                     Details = presence.Details ?? string.Empty,
                     State = presence.State ?? string.Empty,
                     LargeImageKey = presence.Assets?.LargeImageKey ?? string.Empty,
@@ -316,7 +377,13 @@ namespace KiwiRichPresence.Managers
             };
         }
 
-        private static string BuildActivePresetLabel(PresenceJobOverride? jobOverride, PresenceContextOverride contextOverride, string contextLabel)
+        private static string BuildActivePresetLabel(
+            PresenceJobOverride? jobOverride,
+            PresenceZoneOverride? zoneOverride,
+            PresenceContextOverride? standardContextOverride,
+            PresenceContextOverride? finalContextOverride,
+            string? standardContextLabel,
+            string? finalContextLabel)
         {
             var activeLabels = new List<string> { "Global overrides" };
             if (jobOverride is not null)
@@ -324,9 +391,19 @@ namespace KiwiRichPresence.Managers
                 activeLabels.Add(string.IsNullOrWhiteSpace(jobOverride.Label) ? "Job preset" : jobOverride.Label.Trim());
             }
 
-            if (contextOverride.Enabled)
+            if (standardContextOverride?.Enabled == true && !string.IsNullOrWhiteSpace(standardContextLabel))
             {
-                activeLabels.Add($"{contextLabel} preset");
+                activeLabels.Add($"{standardContextLabel} preset");
+            }
+
+            if (zoneOverride is not null)
+            {
+                activeLabels.Add(string.IsNullOrWhiteSpace(zoneOverride.Label) ? "Zone preset" : zoneOverride.Label.Trim());
+            }
+
+            if (finalContextOverride?.Enabled == true && !string.IsNullOrWhiteSpace(finalContextLabel))
+            {
+                activeLabels.Add($"{finalContextLabel} preset");
             }
 
             return string.Join(" + ", activeLabels);
@@ -500,13 +577,8 @@ namespace KiwiRichPresence.Managers
                 : null;
         }
 
-        private static PresenceContextType DetermineContextType(RichPresenceConfig config, bool isAfk, bool isHousing, bool isDuty)
+        private static PresenceContextType DetermineBaseContextType(bool isHousing, bool isDuty)
         {
-            if (config.ShowAfk && isAfk)
-            {
-                return PresenceContextType.Afk;
-            }
-
             if (isDuty)
             {
                 return PresenceContextType.Duty;
@@ -518,6 +590,16 @@ namespace KiwiRichPresence.Managers
             }
 
             return PresenceContextType.OpenWorld;
+        }
+
+        private static PresenceContextType DetermineContextType(RichPresenceConfig config, bool isAfk, PresenceContextType baseContextType)
+        {
+            if (config.ShowAfk && isAfk)
+            {
+                return PresenceContextType.Afk;
+            }
+
+            return baseContextType;
         }
 
         private static PresenceContextOverride GetContextOverride(RichPresenceConfig config, PresenceContextType contextType)
@@ -557,11 +639,59 @@ namespace KiwiRichPresence.Managers
             return null;
         }
 
-        private static PresenceLocationPrivacyMode ResolvePrivacyMode(RichPresenceConfig config, PresenceContextOverride contextOverride)
+        private static PresenceZoneOverride? FindMatchingZoneOverride(RichPresenceConfig config, uint territoryId)
         {
-            return contextOverride.Enabled && contextOverride.LocationPrivacyMode != PresenceLocationPrivacyMode.Inherit
-                ? contextOverride.LocationPrivacyMode
-                : config.LocationPrivacyMode;
+            if (territoryId == 0 || config.ZoneOverrides.Count == 0)
+            {
+                return null;
+            }
+
+            foreach (var zoneOverride in config.ZoneOverrides)
+            {
+                if (!zoneOverride.Enabled || zoneOverride.TerritoryIds.Count == 0)
+                {
+                    continue;
+                }
+
+                if (zoneOverride.TerritoryIds.Contains(territoryId))
+                {
+                    return zoneOverride;
+                }
+            }
+
+            return null;
+        }
+
+        private static PresenceLocationPrivacyMode ResolvePrivacyMode(
+            RichPresenceConfig config,
+            PresenceJobOverride? jobOverride,
+            PresenceContextOverride? standardContextOverride,
+            PresenceZoneOverride? zoneOverride,
+            PresenceContextOverride? finalContextOverride)
+        {
+            var privacyMode = config.LocationPrivacyMode;
+
+            if (jobOverride is not null && jobOverride.LocationPrivacyMode != PresenceLocationPrivacyMode.Inherit)
+            {
+                privacyMode = jobOverride.LocationPrivacyMode;
+            }
+
+            if (standardContextOverride?.Enabled == true && standardContextOverride.LocationPrivacyMode != PresenceLocationPrivacyMode.Inherit)
+            {
+                privacyMode = standardContextOverride.LocationPrivacyMode;
+            }
+
+            if (zoneOverride is not null && zoneOverride.LocationPrivacyMode != PresenceLocationPrivacyMode.Inherit)
+            {
+                privacyMode = zoneOverride.LocationPrivacyMode;
+            }
+
+            if (finalContextOverride?.Enabled == true && finalContextOverride.LocationPrivacyMode != PresenceLocationPrivacyMode.Inherit)
+            {
+                privacyMode = finalContextOverride.LocationPrivacyMode;
+            }
+
+            return privacyMode;
         }
 
         private static string GetContextLabel(PresenceContextType contextType)

@@ -8,6 +8,7 @@
 - Global overrides for status text, images, hover text, and privacy
 - Context presets for menus, login queue, open world, housing, duties, and AFK
 - Job presets for role- or class-specific presentation
+- Zone presets for territory-specific presentation such as PvP-only artwork
 - Custom large and small image URLs
 - Template tokens for dynamic text
 - Live preview plus `Apply/Test Now` support in `/prp`
@@ -32,7 +33,7 @@ The practical setup guide lives here:
 
 - [Usage Guide](docs/USAGE.md)
 
-It covers global overrides, context presets, job presets, template tokens, custom images/icons, privacy behavior, preview/apply behavior, and override precedence.
+It covers global overrides, context presets, job presets, zone presets, template tokens, custom images/icons, privacy behavior, preview/apply behavior, and override precedence.
 
 ## Support
 
@@ -53,6 +54,6 @@ This fork preserves the original plugin's purpose while significantly expanding 
 
 ## Release Notes
 
-The current shipping release is `3.0.1.0`.
+The current shipping release is `3.1.0.0`.
 
 See [CHANGELOG.md](CHANGELOG.md) for the concise release summary.

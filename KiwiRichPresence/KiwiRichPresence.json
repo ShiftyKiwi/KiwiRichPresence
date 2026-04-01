@@ -10,5 +10,5 @@
     "Rich Presence",
     "Customization"
   ],
-  "Changelog": "Fork release as KiwiRichPresence. Preserves the original FFXIV Discord Rich Presence core while adding global, context, and job-based overrides, custom large/small artwork, hover text, privacy controls, live preview, manual apply/testing, and the latest stabilization pass for throttled refreshes and Wine bridge ownership."
+  "Changelog": "Adds zone presets for territory-specific Rich Presence customization, including searchable zone targeting, preset precedence guidance in /prp, and support for location-specific large/small image, text, privacy, and party overrides."
 }

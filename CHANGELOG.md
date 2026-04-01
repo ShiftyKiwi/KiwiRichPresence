@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.0.0
+
+- Added `Zone Presets` for territory-specific Rich Presence customization
+- Added searchable zone targeting with bulk-select helpers and current-zone selection
+- Added zone-specific overrides for text, images, hover text, privacy, and party visibility
+- Updated override precedence to include zone presets, with AFK remaining the final special-case layer
+- Added an always-visible override-order note near the top of `/prp`
+
 ## 3.0.1.0
 
 - Fork shipping release under the `KiwiRichPresence` identity

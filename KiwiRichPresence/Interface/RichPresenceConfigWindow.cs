@@ -24,6 +24,14 @@ namespace KiwiRichPresence.Interface
             public string ShortLabel { get; init; } = string.Empty;
         }
 
+        private sealed class ZoneOption
+        {
+            public uint RowId { get; init; }
+            public string Label { get; init; } = string.Empty;
+            public string ShortLabel { get; init; } = string.Empty;
+            public string SearchText { get; init; } = string.Empty;
+        }
+
         private const int MaxCustomImageUrlLength = 256;
         private const int MaxRenderedPresenceTextLength = 128;
         private const int MaxTemplateInputLength = 512;
@@ -93,6 +101,8 @@ namespace KiwiRichPresence.Interface
         private bool IsOpen;
         private RichPresenceConfig RichPresenceConfig;
         private readonly List<JobOption> availableJobs;
+        private readonly List<ZoneOption> availableZones;
+        private string zoneFilterText = string.Empty;
 
         public RichPresenceConfigWindow()
         {
@@ -107,6 +117,44 @@ namespace KiwiRichPresence.Interface
                     ShortLabel = job.Abbreviation.ExtractText(),
                 })
                 .OrderBy(job => job.RowId)
+                .ToList();
+            var zoneCandidates = RichPresencePlugin.DataManager.GetExcelSheet<TerritoryType>()
+                .Where(territory => territory.RowId > 0 && !string.IsNullOrWhiteSpace(territory.PlaceName.Value.Name.ExtractText()))
+                .Select(territory =>
+                {
+                    var zoneName = RichPresencePlugin.LocalizationManager.TitleCase(territory.PlaceName.Value.Name.ExtractText());
+                    var regionName = territory.PlaceNameRegion.Value.Name.ExtractText();
+                    var normalizedRegionName = string.IsNullOrWhiteSpace(regionName)
+                        ? string.Empty
+                        : RichPresencePlugin.LocalizationManager.TitleCase(regionName);
+                    var baseLabel = string.IsNullOrWhiteSpace(normalizedRegionName) || string.Equals(zoneName, normalizedRegionName, StringComparison.Ordinal)
+                        ? zoneName
+                        : $"{zoneName} - {normalizedRegionName}";
+
+                    return new
+                    {
+                        territory.RowId,
+                        ZoneName = zoneName,
+                        RegionName = normalizedRegionName,
+                        BaseLabel = baseLabel,
+                    };
+                })
+                .OrderBy(zone => zone.BaseLabel, StringComparer.Ordinal)
+                .ThenBy(zone => zone.RowId)
+                .ToList();
+            var duplicateZoneLabelCounts = zoneCandidates
+                .GroupBy(zone => zone.BaseLabel, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+            this.availableZones = zoneCandidates
+                .Select(zone => new ZoneOption
+                {
+                    RowId = zone.RowId,
+                    Label = duplicateZoneLabelCounts[zone.BaseLabel] > 1
+                        ? $"{zone.BaseLabel} [ID {zone.RowId}]"
+                        : zone.BaseLabel,
+                    ShortLabel = zone.ZoneName,
+                    SearchText = string.Join(" ", new[] { zone.ZoneName, zone.RegionName, zone.BaseLabel, zone.RowId.ToString() }).ToLowerInvariant(),
+                })
                 .ToList();
             this.RichPresenceConfig = CloneConfig(RichPresencePlugin.RichPresenceConfig);
         }
@@ -134,6 +182,9 @@ namespace KiwiRichPresence.Interface
 
             ImGui.TextWrapped(RichPresencePlugin.LocalizationManager.Localize("DalamudRichPresencePreface1", LocalizationLanguage.Plugin));
             ImGui.TextWrapped(RichPresencePlugin.LocalizationManager.Localize("DalamudRichPresencePreface2", LocalizationLanguage.Plugin));
+            ImGui.TextColored(
+                ImGuiColors.DalamudGrey,
+                "Override order: Global overrides -> Job preset -> Context preset -> Zone preset -> AFK preset. Later matching layers win.");
             ImGui.Separator();
 
             ImGui.BeginChild("scrolling", ImGuiHelpers.ScaledVector2(0, 680), true, ImGuiWindowFlags.HorizontalScrollbar);
@@ -149,6 +200,9 @@ namespace KiwiRichPresence.Interface
             ImGui.Separator();
 
             this.DrawJobPresets();
+            ImGui.Separator();
+
+            this.DrawZonePresets();
             ImGui.Separator();
 
             this.DrawLivePreview(preview);
@@ -442,6 +496,170 @@ namespace KiwiRichPresence.Interface
             }
         }
 
+        private void DrawZonePresets()
+        {
+            if (!ImGui.CollapsingHeader("Zone Presets", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                return;
+            }
+
+            ImGui.TextWrapped("Zone presets let you swap text, images, privacy, and party visibility for specific territories.");
+            ImGui.TextColored(ImGuiColors.DalamudGrey, "Zone presets are more specific than job and regular context presets, so they are ideal for things like PvP-only artwork or a custom image for one city or one raid.");
+
+            if (ImGui.Button("Add zone preset"))
+            {
+                this.RichPresenceConfig.ZoneOverrides.Add(new PresenceZoneOverride
+                {
+                    Label = $"Zone Preset {this.RichPresenceConfig.ZoneOverrides.Count + 1}",
+                });
+            }
+
+            if (this.RichPresenceConfig.ZoneOverrides.Count == 0)
+            {
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "No zone presets yet.");
+                return;
+            }
+
+            int moveUpIndex = -1;
+            int moveDownIndex = -1;
+            int removeIndex = -1;
+
+            for (var i = 0; i < this.RichPresenceConfig.ZoneOverrides.Count; i++)
+            {
+                var zoneOverride = this.RichPresenceConfig.ZoneOverrides[i];
+                var headerLabel = $"{GetZonePresetDisplayName(zoneOverride, i)} [{GetSelectedZoneCountLabel(zoneOverride)}]###zonePreset_{i}";
+                if (!ImGui.CollapsingHeader(headerLabel, ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    continue;
+                }
+
+                ImGui.PushID($"zonePresetBody_{i}");
+
+                ImGui.SetNextItemWidth(-1);
+                ImGui.InputText("Preset name", ref zoneOverride.Label, MaxTemplateInputLength);
+
+                if (ImGui.SmallButton("Move up") && i > 0)
+                {
+                    moveUpIndex = i;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Move down") && i < this.RichPresenceConfig.ZoneOverrides.Count - 1)
+                {
+                    moveDownIndex = i;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Remove"))
+                {
+                    removeIndex = i;
+                }
+
+                this.DrawZoneSelectionEditor(zoneOverride);
+                this.DrawOverrideEditorSettings(
+                    zoneOverride,
+                    "This preset is active when you enter one of its selected zones.",
+                    "This zone preset is currently disabled.");
+
+                ImGui.PopID();
+            }
+
+            if (moveUpIndex > 0)
+            {
+                (this.RichPresenceConfig.ZoneOverrides[moveUpIndex - 1], this.RichPresenceConfig.ZoneOverrides[moveUpIndex]) =
+                    (this.RichPresenceConfig.ZoneOverrides[moveUpIndex], this.RichPresenceConfig.ZoneOverrides[moveUpIndex - 1]);
+            }
+
+            if (moveDownIndex >= 0 && moveDownIndex < this.RichPresenceConfig.ZoneOverrides.Count - 1)
+            {
+                (this.RichPresenceConfig.ZoneOverrides[moveDownIndex], this.RichPresenceConfig.ZoneOverrides[moveDownIndex + 1]) =
+                    (this.RichPresenceConfig.ZoneOverrides[moveDownIndex + 1], this.RichPresenceConfig.ZoneOverrides[moveDownIndex]);
+            }
+
+            if (removeIndex >= 0)
+            {
+                this.RichPresenceConfig.ZoneOverrides.RemoveAt(removeIndex);
+            }
+        }
+
+        private void DrawZoneSelectionEditor(PresenceZoneOverride zoneOverride)
+        {
+            ImGui.Separator();
+            ImGui.TextWrapped("Target zones");
+            var selectedZonesSummary = this.GetSelectedZonesSummary(zoneOverride);
+            ImGui.TextColored(
+                zoneOverride.TerritoryIds.Count > 0 ? ImGuiColors.HealerGreen : WarningColor,
+                zoneOverride.TerritoryIds.Count > 0
+                    ? $"Selected: {selectedZonesSummary}"
+                    : "Select at least one zone for this preset to match.");
+
+            if (this.availableZones.Count == 0)
+            {
+                ImGui.TextColored(WarningColor, "No zone data was available to populate the selector.");
+                return;
+            }
+
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputText("Search zones", ref this.zoneFilterText, MaxTemplateInputLength);
+
+            var filteredZones = this.availableZones
+                .Where(zoneOption => MatchesZoneFilter(zoneOption, this.zoneFilterText))
+                .ToList();
+
+            if (ImGui.SmallButton("Select all filtered"))
+            {
+                foreach (var zoneOption in filteredZones)
+                {
+                    ToggleZoneSelection(zoneOverride, zoneOption.RowId, true);
+                }
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear filtered"))
+            {
+                foreach (var zoneOption in filteredZones)
+                {
+                    ToggleZoneSelection(zoneOverride, zoneOption.RowId, false);
+                }
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Select current zone"))
+            {
+                var currentTerritoryId = (uint)RichPresencePlugin.ClientState.TerritoryType;
+                if (currentTerritoryId != 0)
+                {
+                    ToggleZoneSelection(zoneOverride, currentTerritoryId, true);
+                }
+            }
+
+            if (filteredZones.Count == 0)
+            {
+                ImGui.TextColored(ImGuiColors.DalamudGrey, "No zones match the current search.");
+                return;
+            }
+
+            if (ImGui.BeginChild("zonePresetTargets", ImGuiHelpers.ScaledVector2(0, 260), true))
+            {
+                if (ImGui.BeginTable("zonePresetTargetsTable", 3, ImGuiTableFlags.SizingStretchProp))
+                {
+                    foreach (var zoneOption in filteredZones)
+                    {
+                        ImGui.TableNextColumn();
+                        var isSelected = zoneOverride.TerritoryIds.Contains(zoneOption.RowId);
+                        if (ImGui.Checkbox(zoneOption.Label, ref isSelected))
+                        {
+                            ToggleZoneSelection(zoneOverride, zoneOption.RowId, isSelected);
+                        }
+                    }
+
+                    ImGui.EndTable();
+                }
+
+                ImGui.EndChild();
+            }
+        }
+
         private void DrawLivePreview(PresencePreviewSnapshot preview)
         {
             if (!ImGui.CollapsingHeader("Live Preview", ImGuiTreeNodeFlags.DefaultOpen))
@@ -712,6 +930,7 @@ namespace KiwiRichPresence.Interface
                 DutyOverride = CloneContextOverride(source.DutyOverride),
                 AfkOverride = CloneContextOverride(source.AfkOverride),
                 JobOverrides = CloneJobOverrides(source.JobOverrides),
+                ZoneOverrides = CloneZoneOverrides(source.ZoneOverrides),
                 ShowStartTime = source.ShowStartTime,
                 ResetTimeWhenChangingZones = source.ResetTimeWhenChangingZones,
                 ShowJob = source.ShowJob,
@@ -777,11 +996,48 @@ namespace KiwiRichPresence.Interface
             return clonedOverrides;
         }
 
+        private static List<PresenceZoneOverride> CloneZoneOverrides(List<PresenceZoneOverride> source)
+        {
+            var clonedOverrides = new List<PresenceZoneOverride>(source.Count);
+            foreach (var zoneOverride in source)
+            {
+                clonedOverrides.Add(new PresenceZoneOverride
+                {
+                    Label = zoneOverride.Label,
+                    TerritoryIds = [.. zoneOverride.TerritoryIds],
+                    Enabled = zoneOverride.Enabled,
+                    LocationPrivacyMode = zoneOverride.LocationPrivacyMode,
+                    UseDetailsTemplate = zoneOverride.UseDetailsTemplate,
+                    DetailsTemplate = zoneOverride.DetailsTemplate,
+                    UseStateTemplate = zoneOverride.UseStateTemplate,
+                    StateTemplate = zoneOverride.StateTemplate,
+                    LargeImageMode = zoneOverride.LargeImageMode,
+                    LargeImageUrl = zoneOverride.LargeImageUrl,
+                    UseLargeImageTextTemplate = zoneOverride.UseLargeImageTextTemplate,
+                    LargeImageTextTemplate = zoneOverride.LargeImageTextTemplate,
+                    SmallImageMode = zoneOverride.SmallImageMode,
+                    SmallImageUrl = zoneOverride.SmallImageUrl,
+                    UseSmallImageTextTemplate = zoneOverride.UseSmallImageTextTemplate,
+                    SmallImageTextTemplate = zoneOverride.SmallImageTextTemplate,
+                    HideParty = zoneOverride.HideParty,
+                });
+            }
+
+            return clonedOverrides;
+        }
+
         private static string GetJobPresetDisplayName(PresenceJobOverride jobOverride, int index)
         {
             return string.IsNullOrWhiteSpace(jobOverride.Label)
                 ? $"Job Preset {index + 1}"
                 : jobOverride.Label.Trim();
+        }
+
+        private static string GetZonePresetDisplayName(PresenceZoneOverride zoneOverride, int index)
+        {
+            return string.IsNullOrWhiteSpace(zoneOverride.Label)
+                ? $"Zone Preset {index + 1}"
+                : zoneOverride.Label.Trim();
         }
 
         private string GetSelectedJobsSummary(PresenceJobOverride jobOverride)
@@ -801,6 +1057,41 @@ namespace KiwiRichPresence.Interface
                 : string.Join(", ", selectedJobs);
         }
 
+        private string GetSelectedZonesSummary(PresenceZoneOverride zoneOverride)
+        {
+            if (zoneOverride.TerritoryIds.Count == 0)
+            {
+                return "No zones selected";
+            }
+
+            var selectedZones = this.availableZones
+                .Where(zoneOption => zoneOverride.TerritoryIds.Contains(zoneOption.RowId))
+                .Select(zoneOption => zoneOption.ShortLabel)
+                .Distinct(StringComparer.Ordinal)
+                .Take(4)
+                .ToList();
+
+            if (selectedZones.Count == 0)
+            {
+                return $"{zoneOverride.TerritoryIds.Count} zones";
+            }
+
+            var remainingCount = zoneOverride.TerritoryIds.Count - selectedZones.Count;
+            return remainingCount > 0
+                ? $"{string.Join(", ", selectedZones)} (+{remainingCount} more)"
+                : string.Join(", ", selectedZones);
+        }
+
+        private static string GetSelectedZoneCountLabel(PresenceZoneOverride zoneOverride)
+        {
+            return zoneOverride.TerritoryIds.Count switch
+            {
+                0 => "No zones selected",
+                1 => "1 zone",
+                _ => $"{zoneOverride.TerritoryIds.Count} zones",
+            };
+        }
+
         private static void ToggleJobSelection(PresenceJobOverride jobOverride, uint jobId, bool isSelected)
         {
             if (isSelected)
@@ -815,6 +1106,28 @@ namespace KiwiRichPresence.Interface
             }
 
             jobOverride.JobIds.Remove(jobId);
+        }
+
+        private static bool MatchesZoneFilter(ZoneOption zoneOption, string filterText)
+        {
+            return string.IsNullOrWhiteSpace(filterText)
+                || zoneOption.SearchText.Contains(filterText.Trim().ToLowerInvariant(), StringComparison.Ordinal);
+        }
+
+        private static void ToggleZoneSelection(PresenceZoneOverride zoneOverride, uint territoryId, bool isSelected)
+        {
+            if (isSelected)
+            {
+                if (!zoneOverride.TerritoryIds.Contains(territoryId))
+                {
+                    zoneOverride.TerritoryIds.Add(territoryId);
+                    zoneOverride.TerritoryIds.Sort();
+                }
+
+                return;
+            }
+
+            zoneOverride.TerritoryIds.Remove(territoryId);
         }
     }
 }

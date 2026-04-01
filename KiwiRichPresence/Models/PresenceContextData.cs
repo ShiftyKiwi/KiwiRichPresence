@@ -11,6 +11,7 @@ namespace KiwiRichPresence.Models
         public string World { get; init; } = string.Empty;
         public string HomeWorld { get; init; } = string.Empty;
         public string DataCenter { get; init; } = string.Empty;
+        public uint TerritoryId { get; init; }
         public string Zone { get; init; } = string.Empty;
         public string Region { get; init; } = string.Empty;
         public string Location { get; init; } = string.Empty;

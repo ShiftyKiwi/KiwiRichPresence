@@ -6,7 +6,7 @@ namespace KiwiRichPresence.Configuration
 {
     internal class RichPresenceConfig : IPluginConfiguration
     {
-        public int Version { get; set; } = 2;
+        public int Version { get; set; } = 3;
 
         public bool ShowLoginQueuePosition = true;
         public bool ShowName = true;
@@ -41,6 +41,7 @@ namespace KiwiRichPresence.Configuration
         public PresenceContextOverride DutyOverride = new();
         public PresenceContextOverride AfkOverride = new();
         public List<PresenceJobOverride> JobOverrides = [];
+        public List<PresenceZoneOverride> ZoneOverrides = [];
 
         public bool ShowStartTime = false;
         public bool ResetTimeWhenChangingZones = true;
